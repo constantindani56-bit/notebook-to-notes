@@ -1,6 +1,6 @@
 # Notebook → Notes
 
-A mobile-friendly, static web app that turns a photo of handwritten notes or a whiteboard into organized, editable Markdown. The frontend calls Google’s Gemini API directly; there is no backend, proxy, analytics, or third-party runtime library.
+A mobile-friendly, static web app that turns one or more photos of handwritten notes or a whiteboard into organized, editable Markdown. The frontend calls Google’s Gemini API directly; there is no backend, proxy, analytics, or third-party runtime library.
 
 ## Run locally
 
@@ -25,16 +25,16 @@ The key is stored in this browser’s `localStorage` and sent only to Google’s
 
 ## Images and privacy
 
-Photos are decoded, resized to a maximum 2,000 px on the long side, and contrast/lighting adjusted in browser memory. They are not written to `localStorage`, IndexedDB, Cache Storage, or an app server. A photo is included in a Gemini API request only when you convert it (or explicitly choose **Try harder** / a strip retry). Requests set `store: false` so interactions are not saved for later API retrieval; Google’s separate free-tier data-use policies still apply. The service worker caches only app shell files, never photos or API responses. Closing or reloading the page releases the in-memory images.
+Photos are decoded, resized to a maximum 2,000 px on the long side, and contrast/lighting adjusted in browser memory. They are not written to `localStorage`, IndexedDB, Cache Storage, or an app server. Photos are included in a Gemini API request only when you convert them (or explicitly choose **Try harder** / a strip retry). Requests set `store: false` so interactions are not saved for later API retrieval; Google’s separate free-tier data-use policies still apply. The service worker caches only app shell files, never photos or API responses. Closing or reloading the page releases the in-memory images.
 
 ## Use
 
 1. Choose a subject and note language.
-2. Tap **Take a photo** or select an existing image. For better recognition, use bright, even light and photograph the page from directly above.
-3. Optionally crop or rotate, then choose **Convert to notes**. The normal conversion uses one Gemini request; 429 responses are retried with exponential backoff.
+2. Tap **Take a photo** to add pages one at a time, or use **Add photos from library** to select several together. Up to six photos can be included in one batch. Photos get visible numbers in their current order; use the arrows to arrange them in lecture sequence and select a thumbnail before cropping or rotating.
+3. Optionally crop or rotate a selected photo, then choose **Convert to notes**. All photos in a batch are labeled and sent in order in one Gemini request; Gemini is asked to connect consecutive material and keep the notes grouped under matching photo numbers. 429 responses are retried with exponential backoff.
 4. Review and edit the result. Yellow uncertain words can be tapped to choose a suggestion or enter a correction.
-5. **Try harder on a crop** is shown only when the transcription contains several unreadable `[???]` marks. It sends one user-selected crop in a follow-up request. If the whole-page reading fails or remains very unclear, you can explicitly choose **Read in strips**; that option sends three overlapping horizontal crops and uses extra calls.
-6. Add pages to the same note, copy the Markdown, or download `.md` / `.txt`.
+5. **Try harder on a crop** is shown only when the transcription contains several unreadable `[???]` marks. It sends one user-selected crop in a follow-up request, labeled with its source photo number. If a single-photo batch fails or remains very unclear, you can explicitly choose **Read in strips**; that option sends three overlapping horizontal crops and uses extra calls.
+6. **Add another page** to start another photo batch in the same note, then copy the Markdown or download `.md` / `.txt`.
 
 The small counter in the header tracks Gemini API requests made today in this browser. It counts key tests and retry attempts too.
 
