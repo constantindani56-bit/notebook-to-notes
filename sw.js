@@ -1,6 +1,6 @@
 "use strict";
 
-const CACHE_NAME = "notebook-notes-static-v1";
+const CACHE_NAME = "notebook-notes-static-v2";
 const APP_FILES = [
   "./index.html",
   "./styles.css",
