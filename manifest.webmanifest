@@ -1,7 +1,7 @@
 {
   "name": "Notebook → Notes",
   "short_name": "Notebook Notes",
-  "description": "Turn handwritten notebook pages into organized digital notes.",
+  "description": "Turn one or more handwritten notebook page photos into organized digital notes.",
   "lang": "en",
   "start_url": "./",
   "scope": "./",
