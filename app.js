@@ -10,6 +10,7 @@ const DEFAULT_MODEL = "gemini-3.8-flash";
 const API_URL = "https://generativelanguage.googleapis.com/v1beta/interactions";
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 const MAX_IMAGE_EDGE = 2000;
+const MAX_BATCH_IMAGES = 6;
 const RESPONSE_SCHEMA = {
   type: "object",
   properties: {
@@ -34,6 +35,9 @@ const state = {
   file: null,
   imageCanvas: null,
   imageUrl: null,
+  images: [],
+  selectedImageIndex: 0,
+  preparingImages: false,
   notes: "",
   uncertain: [],
   pages: [],
@@ -180,17 +184,127 @@ async function decodeImage(file) {
   }
 }
 
+function syncSelectedImage() {
+  const selected = state.images[state.selectedImageIndex] || null;
+  state.file = selected?.file || null;
+  state.imageCanvas = selected?.canvas || null;
+  state.imageUrl = selected?.url || null;
+  return selected;
+}
+
+function renderSelectedImages() {
+  const list = $("selected-image-list");
+  list.textContent = "";
+  const hasImages = state.images.length > 0;
+  const atLimit = state.images.length >= MAX_BATCH_IMAGES;
+  $("selected-images").hidden = !hasImages;
+  $("image-edit-actions").hidden = !hasImages;
+  $("convert-button").disabled = !hasImages || state.preparingImages;
+  $("photo-input").disabled = atLimit || state.preparingImages;
+  $("gallery-input").disabled = atLimit || state.preparingImages;
+  $("add-gallery-photos").disabled = atLimit || state.preparingImages;
+  $("selected-image-count").textContent = hasImages
+    ? `${state.images.length} of ${MAX_BATCH_IMAGES} · numbered in lecture order`
+    : "";
+  $("upload-title").textContent = atLimit
+    ? `${MAX_BATCH_IMAGES}-photo limit reached`
+    : hasImages ? "Take another photo" : "Take a photo";
+  $("upload-subtitle").textContent = atLimit
+    ? "Remove a photo to add another"
+    : hasImages ? `Adds Photo ${state.images.length + 1} to the sequence` : "Adds the first photo in lecture order";
+  $("image-edit-status").textContent = hasImages
+    ? `Photo ${state.selectedImageIndex + 1} selected · light and contrast enhanced in this browser.`
+    : "Light and contrast enhanced in this browser.";
+  $("open-crop").textContent = hasImages ? `Crop / rotate Photo ${state.selectedImageIndex + 1}` : "Crop / rotate";
+
+  state.images.forEach((image, index) => {
+    const card = document.createElement("div");
+    card.className = `image-queue-card${index === state.selectedImageIndex ? " is-selected" : ""}`;
+    card.setAttribute("role", "listitem");
+
+    const select = document.createElement("button");
+    select.type = "button";
+    select.className = "image-queue-select";
+    select.setAttribute("aria-label", `Select Photo ${index + 1}${image.file?.name ? `, ${image.file.name}` : ""}`);
+    select.setAttribute("aria-pressed", index === state.selectedImageIndex ? "true" : "false");
+    const thumbnail = document.createElement("img");
+    thumbnail.src = image.url;
+    thumbnail.alt = "";
+    const number = document.createElement("span");
+    number.className = "image-number";
+    number.textContent = `Photo ${index + 1}`;
+    select.append(thumbnail, number);
+    select.addEventListener("click", () => {
+      state.selectedImageIndex = index;
+      syncSelectedImage();
+      renderSelectedImages();
+    });
+
+    const name = document.createElement("span");
+    name.className = "image-queue-name";
+    name.textContent = image.file?.name || `Photo ${index + 1}`;
+    name.title = name.textContent;
+
+    const actions = document.createElement("div");
+    actions.className = "image-queue-actions";
+    actions.setAttribute("aria-label", `Reorder or remove Photo ${index + 1}`);
+    const moveUp = document.createElement("button");
+    moveUp.type = "button";
+    moveUp.textContent = "↑";
+    moveUp.title = `Move Photo ${index + 1} earlier`;
+    moveUp.setAttribute("aria-label", moveUp.title);
+    moveUp.disabled = index === 0 || state.preparingImages;
+    moveUp.addEventListener("click", () => moveQueuedImage(index, -1));
+    const moveDown = document.createElement("button");
+    moveDown.type = "button";
+    moveDown.textContent = "↓";
+    moveDown.title = `Move Photo ${index + 1} later`;
+    moveDown.setAttribute("aria-label", moveDown.title);
+    moveDown.disabled = index === state.images.length - 1 || state.preparingImages;
+    moveDown.addEventListener("click", () => moveQueuedImage(index, 1));
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "remove-queued-image";
+    remove.textContent = "×";
+    remove.title = `Remove Photo ${index + 1}`;
+    remove.setAttribute("aria-label", remove.title);
+    remove.disabled = state.preparingImages;
+    remove.addEventListener("click", () => removeQueuedImage(index));
+    actions.append(moveUp, moveDown, remove);
+    card.append(select, name, actions);
+    list.append(card);
+  });
+}
+
 function updatePreview() {
-  if (state.imageUrl?.startsWith("blob:")) URL.revokeObjectURL(state.imageUrl);
-  state.imageUrl = state.imageCanvas.toDataURL("image/jpeg", 0.9);
-  $("preview-image").src = state.imageUrl;
-  $("selected-image").hidden = false;
-  $("selected-name").textContent = state.file?.name || "Notebook page";
-  $("selected-dimensions").textContent = `${state.imageCanvas.width} × ${state.imageCanvas.height} px · prepared in this browser`;
-  $("upload-title").textContent = "Choose a different photo";
-  $("upload-subtitle").textContent = "Tap to replace the selected page";
-  $("image-edit-actions").hidden = false;
-  $("convert-button").disabled = false;
+  const selected = syncSelectedImage();
+  if (!selected) return;
+  selected.url = selected.canvas.toDataURL("image/jpeg", 0.9);
+  state.imageUrl = selected.url;
+  renderSelectedImages();
+}
+
+function moveQueuedImage(index, direction) {
+  const target = index + direction;
+  if (target < 0 || target >= state.images.length) return;
+  const [image] = state.images.splice(index, 1);
+  state.images.splice(target, 0, image);
+  if (state.selectedImageIndex === index) state.selectedImageIndex = target;
+  else if (direction < 0 && state.selectedImageIndex === target) state.selectedImageIndex += 1;
+  else if (direction > 0 && state.selectedImageIndex === target) state.selectedImageIndex -= 1;
+  syncSelectedImage();
+  renderSelectedImages();
+}
+
+function removeQueuedImage(index) {
+  if (index < 0 || index >= state.images.length) return;
+  state.images.splice(index, 1);
+  if (!state.images.length) state.selectedImageIndex = 0;
+  else if (state.selectedImageIndex > index) state.selectedImageIndex -= 1;
+  else if (state.selectedImageIndex === index) state.selectedImageIndex = Math.min(index, state.images.length - 1);
+  syncSelectedImage();
+  renderSelectedImages();
+  hideError();
 }
 
 function cloneCanvas(source) {
@@ -289,37 +403,55 @@ function applyCrop() {
   $("crop-instructions").textContent = "Drag across the page to select a crop. Rotate if the page is sideways.";
   $("apply-crop").textContent = "Use photo";
   if (purpose === "try-harder") {
-    retryWithCrop(output);
+    retryWithCrop(output, state.selectedImageIndex);
     return;
   }
-  state.imageCanvas = output;
+  const selected = state.images[state.selectedImageIndex];
+  if (!selected) return;
+  selected.canvas = output;
   updatePreview();
   hideError();
 }
 
-async function selectFile(file) {
+async function selectFiles(fileList) {
   hideError();
-  if (!file) return;
+  const files = Array.from(fileList || []);
+  if (!files.length || state.preparingImages) return;
   state.canRetryStrips = false;
   state.retryUsed = false;
   state.stripsUsed = false;
-  if (!file.type.startsWith("image/")) {
-    showError("Please choose an image file (JPG, PNG or WebP).");
-    return;
+  const errors = [];
+  state.preparingImages = true;
+  renderSelectedImages();
+  for (const file of files) {
+    if (state.images.length >= MAX_BATCH_IMAGES) {
+      errors.push(`You can add up to ${MAX_BATCH_IMAGES} photos to one lecture sequence.`);
+      break;
+    }
+    if (!file.type.startsWith("image/")) {
+      errors.push(`${file.name || "A selected file"} is not an image. Choose a JPG, PNG or WebP photo.`);
+      continue;
+    }
+    if (file.size > MAX_IMAGE_BYTES) {
+      errors.push(`${file.name || "That image"} is over 20 MB. Choose a smaller photo.`);
+      continue;
+    }
+    try {
+      const canvas = await decodeImage(file);
+      state.images.push({
+        file,
+        canvas,
+        url: canvas.toDataURL("image/jpeg", 0.9)
+      });
+      state.selectedImageIndex = state.images.length - 1;
+    } catch {
+      errors.push(`We couldn’t open ${file.name || "one of those images"}. Try a JPG, PNG or WebP photo.`);
+    }
   }
-  if (file.size > MAX_IMAGE_BYTES) {
-    showError("That image is over 20 MB. Choose a smaller photo or resize it before uploading.");
-    return;
-  }
-  try {
-    state.file = file;
-    state.imageCanvas = await decodeImage(file);
-    updatePreview();
-  } catch {
-    state.file = null;
-    state.imageCanvas = null;
-    showError("We couldn’t open that image. Try a JPG, PNG or WebP photo.");
-  }
+  state.preparingImages = false;
+  syncSelectedImage();
+  renderSelectedImages();
+  if (errors.length) showError(errors.join(" "));
 }
 
 function imageAsBase64(canvas) {
@@ -327,16 +459,21 @@ function imageAsBase64(canvas) {
   return dataUrl.slice(dataUrl.indexOf(",") + 1);
 }
 
-function buildTranscriptionPrompt(subject, language, topic = "") {
+function buildTranscriptionPrompt(subject, language, topic = "", photoCount = 1) {
   return [
-    "Transcribe and organize the handwritten notebook or whiteboard image into clear, faithful study notes.",
+    photoCount > 1
+      ? `Transcribe and organize these ${photoCount} handwritten notebook or whiteboard photos into one clear, faithful set of lecture notes.`
+      : "Transcribe and organize the handwritten notebook or whiteboard image into clear, faithful study notes.",
+    photoCount > 1
+      ? `The photos are labeled with their current Photo numbers, which define the user's lecture order. They are consecutive parts of the same lecture. Follow that exact sequence, use context from earlier photos to understand later ones, and do not repeat text that appears in overlapping edges. Keep the material from each photo under a heading named "Photo 1", "Photo 2", and so on, so the lecture order remains clear.`
+      : "",
     `Subject or topic: ${subject}.`,
     topic.trim() ? `Specific topic or class context: ${topic.trim()}.` : "",
     `Language: ${language}. If automatic, preserve the language(s) actually written.`,
     "Read carefully letter by letter. Handwriting may be very messy, slanted, cramped, connected, or rushed, with missing letters, corrections, and crossed-out words. Ignore crossed-out words.",
     "Use the subject and surrounding context to suggest likely readings, but do not silently guess. Mark a plausible but uncertain word in notes_markdown exactly as [?word?]. Mark unreadable text exactly as [???]. Include each uncertain marker in the uncertain array's word field and give short likely alternatives when possible.",
     "Keep the original meaning and language. Preserve accented characters, including Hungarian á, é, í, ó, ö, ő, ú, ü, ű; recognize common school abbreviations and subject terms. English or German may also appear.",
-    "Organize the material with concise headings, bullets, and numbered steps where useful. Do not add facts that are not in the page.",
+    "Organize the material with concise headings, bullets, and numbered steps where useful. Do not add facts that are not in the source photos.",
     "Rewrite formulas clearly using Unicode or LaTeX, including fractions, roots, subscripts, and arrows. Format table-like content as a Markdown table.",
     "Return only the requested JSON object."
   ].filter(Boolean).join("\n");
@@ -465,7 +602,9 @@ function newPageRecord(result, options = {}) {
     uncertain: result.uncertain,
     imageUrl: state.imageUrl,
     imageCanvas: state.imageCanvas,
-    fileName: state.file?.name || state.activeFileName || `page-${state.pages.length + 1}`,
+    images: state.images.slice(),
+    imageIndex: state.selectedImageIndex,
+    fileName: state.images[0]?.file?.name || state.activeFileName || `page-${state.pages.length + 1}`,
     subject: $("subject-select").value,
     language: $("language-select").value,
     topic: $("topic-input").value,
@@ -482,6 +621,8 @@ function commitCurrentResult(result, options = {}) {
     page = state.pages[state.activePageIndex];
     page.notes = result.notes;
     page.uncertain = result.uncertain;
+    page.images = state.images.slice();
+    page.imageIndex = state.selectedImageIndex;
     page.imageUrl = state.imageUrl || page.imageUrl;
     page.imageCanvas = state.imageCanvas || page.imageCanvas;
     if (options.retryUsed !== undefined) page.retryUsed = options.retryUsed;
@@ -495,8 +636,9 @@ function commitCurrentResult(result, options = {}) {
   }
   state.notes = page.notes;
   state.uncertain = page.uncertain;
-  state.imageUrl = page.imageUrl;
-  state.imageCanvas = page.imageCanvas;
+  state.images = page.images || [{ file: null, canvas: page.imageCanvas, url: page.imageUrl }];
+  state.selectedImageIndex = Math.min(page.imageIndex || 0, Math.max(0, state.images.length - 1));
+  syncSelectedImage();
   state.activeFileName = page.fileName;
   state.retryUsed = page.retryUsed;
   state.canRetryStrips = page.canRetryStrips;
@@ -506,23 +648,29 @@ function commitCurrentResult(result, options = {}) {
   renderResult();
 }
 
-function notesInputForCanvas(canvas, prompt) {
-  return [
-    { type: "text", text: prompt },
-    { type: "image", data: imageAsBase64(canvas), mime_type: "image/jpeg" }
-  ];
+function notesInputForImages(source, prompt) {
+  const images = Array.isArray(source)
+    ? source.map((item) => item?.canvas ? item : { canvas: item })
+    : [{ canvas: source }];
+  const input = [{ type: "text", text: prompt }];
+  images.forEach((image, index) => {
+    const label = image.label || `Photo ${index + 1} of ${images.length}, in the user's lecture order.`;
+    input.push({ type: "text", text: label });
+    input.push({ type: "image", data: imageAsBase64(image.canvas), mime_type: "image/jpeg" });
+  });
+  return input;
 }
 
-async function requestNotes(canvas, prompt) {
+async function requestNotes(images, prompt) {
   const response = await callGemini({
-    input: notesInputForCanvas(canvas, prompt),
+    input: notesInputForImages(images, prompt),
     responseFormat: { type: "text", mime_type: "application/json", schema: RESPONSE_SCHEMA }
   });
   return validateNoteResult(response);
 }
 
 async function convertPage() {
-  if (!state.imageCanvas) return;
+  if (!state.images.length || state.preparingImages) return;
   if (!getApiKey()) {
     refreshView();
     return;
@@ -534,25 +682,34 @@ async function convertPage() {
   state.canRetryStrips = false;
   state.retryUsed = false;
   state.stripsUsed = false;
-  $("loading-title").textContent = "Reading your page…";
-  $("loading-subtitle").textContent = "Looking closely at every word and symbol.";
+  $("loading-title").textContent = state.images.length > 1
+    ? `Reading ${state.images.length} photos in order…`
+    : "Reading your page…";
+  $("loading-subtitle").textContent = state.images.length > 1
+    ? "Using the photo numbers to follow the lecture sequence in one request."
+    : "Looking closely at every word and symbol.";
   try {
     const result = await requestNotes(
-      state.imageCanvas,
-      buildTranscriptionPrompt($("subject-select").value, $("language-select").value, $("topic-input").value)
+      state.images,
+      buildTranscriptionPrompt(
+        $("subject-select").value,
+        $("language-select").value,
+        $("topic-input").value,
+        state.images.length
+      )
     );
     const unknownCount = (result.notes.match(/\[\?\?\?\]/g) || []).length;
-    commitCurrentResult(result, { canRetryStrips: unknownCount >= 6 });
+    commitCurrentResult(result, { canRetryStrips: state.images.length === 1 && unknownCount >= 6 });
   } catch (error) {
     if (error?.code === "unreadable") state.canRetryStrips = true;
     showError(error instanceof Error ? error.message : "Something went wrong. Please try again.");
   } finally {
     $("loading-card").hidden = true;
-    $("convert-button").disabled = !state.imageCanvas;
+    $("convert-button").disabled = !state.images.length || state.preparingImages;
   }
 }
 
-async function retryWithCrop(cropCanvas) {
+async function retryWithCrop(cropCanvas, sourceImageIndex = state.selectedImageIndex) {
   if (!state.notes || state.retryUsed) return;
   hideError();
   state.retryUsed = true;
@@ -563,21 +720,28 @@ async function retryWithCrop(cropCanvas) {
   const subject = page?.subject || $("subject-select").value;
   const language = page?.language || $("language-select").value;
   const topic = page?.topic || $("topic-input").value;
+  const photoCount = state.images.length;
   $("loading-card").hidden = false;
   $("loading-title").textContent = "Taking a closer look…";
   $("loading-subtitle").textContent = "Re-reading only the crop you selected.";
   try {
     const prompt = [
-      "The image is a zoomed crop from one part of a handwritten notebook page. Re-read this crop carefully, using the existing full-page transcription only as context.",
+      `The image is a zoomed crop from Photo ${sourceImageIndex + 1} of ${photoCount || 1} in the current lecture sequence. Re-read this crop carefully, using the existing full-sequence transcription only as context.`,
       `Subject or topic: ${subject}. Language: ${language}.`,
       topic.trim() ? `Specific class/topic context: ${topic.trim()}.` : "",
       "Do not guess silently. Preserve [?word?] for likely but uncertain readings and [???] for unreadable text. Ignore crossed-out text. Preserve original language, accents, formulas, and meaning.",
-      "Return the complete revised notes_markdown, keeping everything outside this crop unchanged. Correct only text that this crop makes clearer. Keep the requested JSON structure.",
+      `Return the complete revised notes_markdown, keeping everything outside Photo ${sourceImageIndex + 1} unchanged. Correct only text that this crop makes clearer, and preserve all Photo headings and sequence. Keep the requested JSON structure.`,
       "Existing full-page notes for context:\n" + originalNotes
     ].join("\n\n");
-    const result = await requestNotes(cropCanvas, prompt);
+    const result = await requestNotes([{
+      canvas: cropCanvas,
+      label: `Zoomed crop from Photo ${sourceImageIndex + 1} of ${photoCount || 1} in the lecture sequence.`
+    }], prompt);
     const unknownCount = (result.notes.match(/\[\?\?\?\]/g) || []).length;
-    commitCurrentResult(result, { retryUsed: true, canRetryStrips: unknownCount >= 6 });
+    commitCurrentResult(result, {
+      retryUsed: true,
+      canRetryStrips: photoCount === 1 && unknownCount >= 6
+    });
   } catch (error) {
     if (error?.code === "unreadable") state.canRetryStrips = true;
     syncRetryActions();
@@ -602,7 +766,7 @@ function makeHorizontalStrips(canvas, count = 3, overlapRatio = 0.1) {
 }
 
 async function readInStrips() {
-  if (!state.imageCanvas || state.stripsUsed) return;
+  if (!state.imageCanvas || state.images.length !== 1 || state.stripsUsed) return;
   hideError();
   state.stripsUsed = true;
   saveActivePage();
@@ -741,8 +905,9 @@ function syncRetryActions() {
   const unknownCount = (state.notes.match(/\[\?\?\?\]/g) || []).length;
   const hasResult = !$("result-card").hidden;
   $("try-harder-button").hidden = !hasResult || state.editing || unknownCount < 3 || state.retryUsed || !state.imageCanvas;
-  $("retry-strips-button").hidden = !hasResult || !state.canRetryStrips || state.stripsUsed || !state.imageCanvas;
-  $("error-retry-strips").hidden = $("error-message").hidden || !state.canRetryStrips || state.stripsUsed || !state.imageCanvas;
+  const singlePhoto = state.images.length === 1;
+  $("retry-strips-button").hidden = !hasResult || !singlePhoto || !state.canRetryStrips || state.stripsUsed || !state.imageCanvas;
+  $("error-retry-strips").hidden = $("error-message").hidden || !singlePhoto || !state.canRetryStrips || state.stripsUsed || !state.imageCanvas;
 }
 
 function renderPageTabs() {
@@ -769,6 +934,8 @@ function saveActivePage() {
   page.retryUsed = state.retryUsed;
   page.canRetryStrips = state.canRetryStrips;
   page.stripsUsed = state.stripsUsed;
+  page.images = state.images.slice();
+  page.imageIndex = state.selectedImageIndex;
   page.imageCanvas = state.imageCanvas || page.imageCanvas;
   page.imageUrl = state.imageUrl || page.imageUrl;
   page.subject = $("subject-select").value;
@@ -783,8 +950,9 @@ function activatePage(index) {
   state.activePageIndex = index;
   state.notes = page.notes;
   state.uncertain = page.uncertain;
-  state.imageUrl = page.imageUrl;
-  state.imageCanvas = page.imageCanvas;
+  state.images = page.images || [{ file: null, canvas: page.imageCanvas, url: page.imageUrl }];
+  state.selectedImageIndex = Math.min(page.imageIndex || 0, Math.max(0, state.images.length - 1));
+  syncSelectedImage();
   state.activeFileName = page.fileName;
   $("subject-select").value = page.subject || "General";
   $("language-select").value = page.language || "Detect automatically";
@@ -800,8 +968,9 @@ function renderResult() {
   $("result-card").hidden = false;
   $("capture-card").hidden = true;
   $("result-image").src = state.imageUrl;
-  $("result-image").alt = `Notebook page ${state.activePageIndex + 1}`;
-  $("result-photo").querySelector("figcaption").textContent = `Original page · Page ${state.activePageIndex + 1} · never saved by the app`;
+  $("result-image").alt = `Photo ${state.selectedImageIndex + 1} of ${state.images.length}, used for these notes`;
+  $("result-photo-caption").textContent = `Photo ${state.selectedImageIndex + 1} of ${state.images.length} · Page ${state.activePageIndex + 1} · never saved by the app`;
+  renderResultImages();
   renderPageTabs();
   $("notes-editor").hidden = true;
   $("notes-preview").hidden = false;
@@ -817,6 +986,31 @@ function renderResult() {
   syncRetryActions();
 }
 
+function renderResultImages() {
+  const list = $("result-image-list");
+  list.textContent = "";
+  state.images.forEach((image, index) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "result-image-choice";
+    button.setAttribute("aria-pressed", index === state.selectedImageIndex ? "true" : "false");
+    button.setAttribute("aria-label", `Show Photo ${index + 1} of ${state.images.length}`);
+    const thumbnail = document.createElement("img");
+    thumbnail.src = image.url;
+    thumbnail.alt = "";
+    const label = document.createElement("span");
+    label.textContent = `Photo ${index + 1}`;
+    button.append(thumbnail, label);
+    button.addEventListener("click", () => {
+      state.selectedImageIndex = index;
+      syncSelectedImage();
+      saveActivePage();
+      renderResult();
+    });
+    list.append(button);
+  });
+}
+
 function showError(message) {
   $("error-message").textContent = message;
   $("error-message").hidden = false;
@@ -830,17 +1024,15 @@ function hideError() {
 }
 
 function clearSelectedImage() {
-  if (state.imageUrl?.startsWith("blob:")) URL.revokeObjectURL(state.imageUrl);
+  state.images = [];
+  state.selectedImageIndex = 0;
+  state.preparingImages = false;
   state.file = null;
   state.imageCanvas = null;
   state.imageUrl = null;
   $("photo-input").value = "";
-  $("selected-image").hidden = true;
-  $("image-edit-actions").hidden = true;
-  $("preview-image").removeAttribute("src");
-  $("upload-title").textContent = "Take a photo";
-  $("upload-subtitle").textContent = "or choose one from your library";
-  $("convert-button").disabled = true;
+  $("gallery-input").value = "";
+  renderSelectedImages();
 }
 
 function addAnotherPage() {
@@ -998,9 +1190,18 @@ function safeFilename() {
 }
 
 function wireEvents() {
-  $("photo-input").addEventListener("change", (event) => selectFile(event.currentTarget.files?.[0]));
+  $("photo-input").addEventListener("change", async (event) => {
+    const files = Array.from(event.currentTarget.files || []);
+    event.currentTarget.value = "";
+    await selectFiles(files);
+  });
+  $("gallery-input").addEventListener("change", async (event) => {
+    const files = Array.from(event.currentTarget.files || []);
+    event.currentTarget.value = "";
+    await selectFiles(files);
+  });
+  $("add-gallery-photos").addEventListener("click", () => $("gallery-input").click());
   $("convert-button").addEventListener("click", convertPage);
-  $("remove-image").addEventListener("click", () => { clearSelectedImage(); hideError(); });
   $("open-crop").addEventListener("click", () => openCropEditor("manual"));
   $("try-harder-button").addEventListener("click", () => openCropEditor("try-harder"));
   $("retry-strips-button").addEventListener("click", readInStrips);
