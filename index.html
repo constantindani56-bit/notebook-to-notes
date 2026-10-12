@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <meta name="theme-color" content="#f7f5ef">
-    <meta name="description" content="Turn handwritten notebook pages into organized digital notes.">
+    <meta name="description" content="Turn one or more handwritten notebook page photos into organized digital notes.">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-title" content="Notebook Notes">
     <link rel="apple-touch-icon" href="./icons/icon-192.png">
@@ -60,7 +60,7 @@
             <div class="hero-copy">
               <p class="eyebrow"><span class="eyebrow-dot"></span> HANDWRITING, MADE CLEAR</p>
               <h1>Your notebook,<br><em>understood.</em></h1>
-              <p>One photo in. Clean, organized notes out. Even when the handwriting gets a little wild.</p>
+              <p>One photo or a whole lecture sequence in. Clean, organized notes out—even when the handwriting gets a little wild.</p>
             </div>
             <div class="hero-doodle" aria-hidden="true">
               <div class="doodle-paper"><span></span><span></span><span></span><b>✳</b></div>
@@ -71,19 +71,24 @@
 
           <section class="capture-card" id="capture-card" aria-labelledby="capture-heading">
             <div class="section-heading">
-              <div><p class="eyebrow">STEP 01</p><h2 id="capture-heading">Bring in a page</h2></div>
+              <div><p class="eyebrow">STEP 01</p><h2 id="capture-heading">Bring in lecture photos</h2></div>
               <span class="private-label"><span aria-hidden="true">◉</span> Private by design</span>
             </div>
             <div class="capture-layout">
-              <label class="upload-zone" for="photo-input" id="upload-zone">
-                <input id="photo-input" type="file" accept="image/*" capture="environment">
-                <span class="upload-art" aria-hidden="true">
-                  <svg viewBox="0 0 48 48"><path d="M8 14h7l3-4h12l3 4h7a3 3 0 0 1 3 3v20a3 3 0 0 1-3 3H8a3 3 0 0 1-3-3V17a3 3 0 0 1 3-3Z"/><circle cx="24" cy="26" r="8"/><path d="M35 20h.01"/></svg>
-                </span>
-                <strong id="upload-title">Take a photo</strong>
-                <span class="upload-subtitle" id="upload-subtitle">or choose one from your library</span>
-                <span class="upload-hint">JPG, PNG or WebP · up to 20 MB</span>
-              </label>
+              <div class="photo-source">
+                <label class="upload-zone" for="photo-input" id="upload-zone">
+                  <input id="photo-input" type="file" accept="image/*" capture="environment">
+                  <span class="upload-art" aria-hidden="true">
+                    <svg viewBox="0 0 48 48"><path d="M8 14h7l3-4h12l3 4h7a3 3 0 0 1 3 3v20a3 3 0 0 1-3 3H8a3 3 0 0 1-3-3V17a3 3 0 0 1 3-3Z"/><circle cx="24" cy="26" r="8"/><path d="M35 20h.01"/></svg>
+                  </span>
+                  <strong id="upload-title">Take a photo</strong>
+                  <span class="upload-subtitle" id="upload-subtitle">Adds the next photo in lecture order</span>
+                  <span class="upload-hint">JPG, PNG or WebP · up to 20 MB each</span>
+                </label>
+                <input id="gallery-input" class="visually-hidden-input" type="file" accept="image/*" multiple>
+                <button class="button button-outline gallery-button" id="add-gallery-photos" type="button">＋ Add photos from library</button>
+                <p class="photo-order-hint">Add up to 6 photos. They’re numbered in order; use the arrows to arrange the lecture sequence.</p>
+              </div>
               <div class="capture-options">
                 <div>
                   <label for="subject-select">What’s the subject?</label>
@@ -122,15 +127,18 @@
                 <button class="button button-primary convert-button" id="convert-button" type="button" disabled>
                   <span>Convert to notes</span><span aria-hidden="true">→</span>
                 </button>
-                <p class="capture-footnote">Your photo stays on this device except for the request to Gemini.</p>
+                <p class="capture-footnote">All selected photos are sent together in one Gemini request. Images stay in memory on this device otherwise.</p>
               </div>
             </div>
-            <div class="selected-image" id="selected-image" hidden>
-              <img id="preview-image" alt="Selected notebook page preview">
-              <div class="selected-image-info"><div><strong id="selected-name">Page selected</strong><small id="selected-dimensions"></small></div><button type="button" id="remove-image" class="text-button">Remove</button></div>
+            <div class="selected-images" id="selected-images" hidden>
+              <div class="selected-images-heading">
+                <strong>Photo order</strong>
+                <span id="selected-image-count" aria-live="polite"></span>
+              </div>
+              <div class="image-queue" id="selected-image-list" role="list" aria-label="Selected photos in lecture order"></div>
             </div>
             <div class="image-edit-actions" id="image-edit-actions" hidden>
-              <span>Light and contrast enhanced in this browser.</span>
+              <span id="image-edit-status">Light and contrast enhanced in this browser.</span>
               <button class="button button-small button-outline" id="open-crop" type="button">Crop / rotate</button>
             </div>
           </section>
@@ -150,7 +158,11 @@
             </div>
             <nav class="page-tabs" id="page-tabs" aria-label="Note pages" hidden></nav>
             <div class="result-layout">
-              <figure class="result-photo" id="result-photo"><img id="result-image" alt="Notebook page used for these notes"><figcaption>Original page · never saved by the app</figcaption></figure>
+              <figure class="result-photo" id="result-photo">
+                <img id="result-image" alt="Selected notebook photo used for these notes">
+                <figcaption id="result-photo-caption">Original photo · never saved by the app</figcaption>
+                <div class="result-image-list" id="result-image-list" aria-label="Photos in lecture order"></div>
+              </figure>
               <div class="result-notes">
                 <div class="note-toolbar"><span class="note-label">DIGITAL NOTES</span><button class="button button-small button-outline" id="edit-toggle" type="button">Edit notes</button></div>
                 <div id="notes-preview" class="notes-preview" aria-live="polite"></div>
